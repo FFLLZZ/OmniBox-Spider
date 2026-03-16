@@ -2,7 +2,7 @@
 // @author 
 // @description 刮削：支持，弹幕：支持，嗅探：支持
 // @dependencies: axios, cheerio
-// @version 1.2.0
+// @version 1.2.1
 // @downloadURL https://gh-proxy.org/https://github.com/Silent1566/OmniBox-Spider/raw/refs/heads/main/影视/采集/在线之家.js
 
 /**
@@ -391,6 +391,38 @@ function buildFileNameForDanmu(vodName, episodeTitle) {
     return vodName;
 }
 
+const buildScrapedEpisodeName = (scrapeData, mapping, originalName) => {
+    if (!mapping || mapping.episodeNumber === 0 || (mapping.confidence && mapping.confidence < 0.5)) {
+        return originalName;
+    }
+    if (mapping.episodeName) {
+        return mapping.episodeName;
+    }
+    if (scrapeData && Array.isArray(scrapeData.episodes)) {
+        const hit = scrapeData.episodes.find(
+            (ep) => ep.episodeNumber === mapping.episodeNumber && ep.seasonNumber === mapping.seasonNumber
+        );
+        if (hit?.name) {
+            return `${hit.episodeNumber}.${hit.name}`;
+        }
+    }
+    return originalName;
+};
+
+const buildScrapedDanmuFileName = (scrapeData, scrapeType, mapping, fallbackVodName, fallbackEpisodeName) => {
+    if (!scrapeData) {
+        return buildFileNameForDanmu(fallbackVodName, fallbackEpisodeName);
+    }
+    if (scrapeType === "movie") {
+        return scrapeData.title || fallbackVodName;
+    }
+    const title = scrapeData.title || fallbackVodName;
+    const seasonAirYear = scrapeData.seasonAirYear || "";
+    const seasonNumber = mapping?.seasonNumber || 1;
+    const episodeNumber = mapping?.episodeNumber || 1;
+    return `${title}.${seasonAirYear}.S${String(seasonNumber).padStart(2, "0")}E${String(episodeNumber).padStart(2, "0")}`;
+};
+
 /**
  * 匹配弹幕
  */
@@ -752,7 +784,7 @@ async function detail(params, context) {
                 const mapping = videoMappings.find((m) => m?.fileId === ep._fid);
                 if (!mapping) continue;
                 const oldName = ep.name;
-                const newName = oldName; // 保持原名，刮削数据用于其他字段
+                const newName = buildScrapedEpisodeName(scrapeData, mapping, oldName);
                 if (newName && newName !== oldName) {
                     ep.name = newName;
                     logInfo(`应用刮削后源文件名: ${oldName} -> ${newName}`);
@@ -852,6 +884,7 @@ async function play(params) {
     }
 
     let scrapedDanmuFileName = "";
+    let scrapeType = "";
     try {
         const videoIdFromParam = params.vodId ? String(params.vodId) : "";
         const videoIdFromMeta = playMeta?.sid ? String(playMeta.sid) : "";
@@ -861,9 +894,13 @@ async function play(params) {
             const metadata = await OmniBox.getScrapeMetadata(videoIdForScrape);
             if (metadata && metadata.scrapeData) {
                 const mapping = (metadata.videoMappings || []).find((m) => m?.fileId === playMeta?.fid);
-                scrapedDanmuFileName = buildFileNameForDanmu(
-                    metadata.scrapeData.title || vodName,
-                    mapping?.episodeName || episodeName
+                scrapeType = metadata.scrapeType || "";
+                scrapedDanmuFileName = buildScrapedDanmuFileName(
+                    metadata.scrapeData,
+                    scrapeType,
+                    mapping,
+                    vodName,
+                    episodeName
                 );
                 if (metadata.scrapeData.title) {
                     vodName = metadata.scrapeData.title;
